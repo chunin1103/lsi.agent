@@ -1,191 +1,154 @@
-# Keyword Burst Buddy – ultra‑minimal black‑&‑white UI
-# ---------------------------------------------------
-# One‑file Streamlit front‑end for lsi_keyword_api.py
-# ---------------------------------------------------
-
-import time
-import pandas as pd
-import requests
+# app.py (Refactored Streamlit Client)
 import streamlit as st
+import pandas as pd
+import pathlib
+
+# Import functions from the new api_client.py
+try:
+    from api_client import get_api_status, stream_sse_keywords
+except ImportError:
+    st.error("Failed to import api_client.py. Make sure it's in the same directory or Python path.")
+    # Fallback or stop execution if critical
+    def get_api_status(seed_kw, planner_active): return {"total_cached_keywords":0} 
+    def stream_sse_keywords(*args, **kwargs): st.error("API client not available."); return
+
 
 # ── Page & global config ───────────────────────────────────────────────────
 st.set_page_config(page_title="Keyword Burst Buddy", layout="wide")
 
-API_BASE  = "http://localhost:8000"   # ← change to your API host/port
-PAGE_SIZE = 50
-TIMEOUT   = 120                      # seconds to wait for crawler
+# Function to load external CSS
+def load_css(file_name):
+    """Loads an external CSS file into the Streamlit app."""
+    try:
+        css_path = pathlib.Path(__file__).parent / file_name
+        with open(css_path) as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+        print(f"APP: Loaded CSS from {css_path}")
+    except FileNotFoundError:
+        st.error(f"CSS file not found: {file_name} at {css_path}")
+        print(f"APP: ERROR - CSS file not found: {file_name} at {css_path}")
 
-# ── Pure black‑&‑white theme (no greys) ────────────────────────────────────
-st.markdown(
-    """
-    <style>
-        html, body, .stApp { background:#ffffff ; color:#000000 ; }
-        /* hide Streamlit’s chrome */
-        header, footer, #MainMenu { visibility:hidden; }
 
-        /* buttons – white background, black border, invert on hover */
-        div.stButton > button {
-            background:#ffffff ;
-            color:#000000 ;
-            border:1px solid #000000 ;
-            border-radius:4px ;
-            padding:0.4rem 1.2rem ;
-            font-weight:600 ;
-        }
-        div.stButton > button:hover {
-            background:#000000 ;
-            color:#ffffff ;
-        }
-
-        /* text inputs / textareas */
-        input[type="text"], textarea {
-            background:#ffffff ;
-            color:#000000 ;
-            border:1px solid #000000 ;
-            border-radius:4px ;
-            padding:0.45rem 0.6rem ;
-        }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+# Load the external CSS file
+load_css("./templates/style.css")
 
 # ── Title ──────────────────────────────────────────────────────────────────
 st.title("Keyword Burst Buddy")
+st.caption("Real-time LSI Keyword Generation with Server-Sent Events")
 
 # ── User controls ──────────────────────────────────────────────────────────
-seed       = st.text_input("Seed keyword", placeholder="e.g. nước mắm")
-order_top  = st.checkbox("Show newest keywords on top", value=True, key="order_top")
-start_btn  = st.button("Generate")
+# Use a form to group inputs and the button, which can sometimes improve interaction consistency
+with st.form(key="keyword_form"):
+    seed_input_val = st.text_input("Seed keyword", placeholder="e.g. nước mắm", key="seed_input")
+    use_planner_val = st.checkbox("Use Google Ads Planner", value=True, key="use_planner_checkbox")
+    order_top_val = st.checkbox("Show newest keywords on top", value=True, key="order_top_checkbox")
+    start_button_val = st.form_submit_button(label="Generate Keywords")
+
 
 # ── Tabs (only LSI is wired for now) ───────────────────────────────────────
 tab_lsi, tab_cluster, tab_vis = st.tabs(["LSI Keywords", "Topic Clusters", "Visualization"])
 
 # ── Streamlit session state ────────────────────────────────────────────────
-state = st.session_state
-state.setdefault("all_kw", [])        # raw order from API (oldest → newest)
+# Initialize session state variables if they don't exist
+if "all_kw" not in st.session_state:
+    st.session_state.all_kw = []  # Stores keywords as they arrive
+if "stream_active" not in st.session_state:
+    st.session_state.stream_active = False # Tracks if a stream is currently active
+if "last_seed" not in st.session_state:
+    st.session_state.last_seed = "" # Stores the last seed used for generation
+if "last_planner_option" not in st.session_state:
+    st.session_state.last_planner_option = True # Stores the last planner option
 
-# ── Helper functions ───────────────────────────────────────────────────────
 
-def fetch_page(seed_kw: str, page: int):
-    r = requests.get(
-        f"{API_BASE}/keywords",
-        params={
-            "seed": seed_kw,
-            "page": page,
-            "page_size": PAGE_SIZE,
-            "planner": "true",
-        },
-    )
-    r.raise_for_status()
-    return r.json()["keywords"]
+# ── Main generate logic (triggered by form submission) ─────────────────────
+if start_button_val: # This is True when the form's submit button is clicked
+    current_seed = seed_input_val.strip()
+    current_planner_option = use_planner_val
+    current_order_top = order_top_val # Get the current sort order preference
 
-def wait_status(seed_kw: str):
-    total = 0
-    """Block until /status says finished, but stream totals meanwhile."""
-    while True:
-        r = requests.get(f"{API_BASE}/status", params={"seed": seed_kw})
-        r.raise_for_status()
-        body = r.json()
-        st.session_state.total = r.json()["total"]      # live progress bar
-
-        # ── start paging as soon as something exists ──
-        if body["total"] and not body["finished"]:
-            return body["total"], False             # <─ NEW
-        if body["finished"]:
-            return body["total"], True
-        time.sleep(1)
-
-def get_status(seed_kw: str) -> dict:
-    r = requests.get(f"{API_BASE}/status", params={"seed": seed_kw})
-    r.raise_for_status()
-    return r.json()
-
-def stream_results(seed_kw: str):
-    """Fetch all pages and update UI live while streaming."""
-    total, ready = wait_status(seed_kw)
-
-    # placeholders we repeatedly overwrite
-    ph_summary = tab_lsi.empty()
-    ph_table   = tab_lsi.empty()
-    prog       = st.progress(0.0, text="Fetching keywords…")
-
-    collected_raw = []                # chronological (oldest → newest)
-    page = 1
-    while True:
-        chunk = fetch_page(seed_kw, page)
-        if not chunk:
-            if ready:               # finished AND empty page → really done
-                break
-            time.sleep(1)           # not finished yet → wait & retry
-            continue
-
-        collected_raw.extend(chunk)
-
-        # adjust display order according to current checkbox
-        display = (list(reversed(collected_raw))
-                   if st.session_state.order_top else collected_raw)
-
-        # live counter & table
-        ph_summary.markdown(f"**Fetched {len(collected_raw):,} / {total:,} keywords**")
-        ph_table.dataframe(
-            pd.DataFrame({"Keyword": display}),
-            use_container_width=True,
-            hide_index=True,
-        )
-
-        prog.progress(min(len(collected_raw) / total, 1.0))
-        page += 1
-        time.sleep(0.2)
-
-    prog.empty()
-    state.all_kw = collected_raw      # store raw order for later use
-
-# ── Main generate logic ────────────────────────────────────────────────────
-if start_btn:
-    if not seed.strip():
+    if not current_seed:
         st.warning("Please enter a seed keyword first.")
-        st.stop()
-    state.all_kw = []                 # reset previous run
-    stream_results(seed.strip())
+    else:
+        print(f"APP: Start button clicked. Seed: '{current_seed}', Planner: {current_planner_option}")
+        # Reset keywords if the seed or planner option has changed, or if no keywords from last run
+        if (current_seed != st.session_state.last_seed or 
+            current_planner_option != st.session_state.last_planner_option or 
+            not st.session_state.all_kw):
+            st.session_state.all_kw = [] 
+            print("APP: Resetting all_kw due to new seed/options or empty previous run.")
+        
+        st.session_state.last_seed = current_seed
+        st.session_state.last_planner_option = current_planner_option
 
-# ── Show final results (reacts to checkbox toggling) ───────────────────────
-if state.all_kw:
+        # Define placeholders within the LSI tab for dynamic content
+        with tab_lsi:
+            summary_placeholder = st.empty()
+            table_placeholder = st.empty()
+        
+        # Progress bar will be outside the tab, globally visible during generation
+        progress_bar = st.progress(0.0, text="Initializing stream...")
+        
+        with st.spinner(f"Initiating keyword generation for '{current_seed}'..."):
+            # Call the keyword streaming function from api_client.py
+            stream_sse_keywords(
+                current_seed, 
+                current_planner_option,
+                current_order_top, # Pass the sort order
+                summary_placeholder,
+                table_placeholder,
+                progress_bar,
+                st.session_state # Pass the whole session state object
+            )
+
+# ── Display final/current results (reacts to checkbox toggling or if data exists) ──
+# This section ensures the UI updates if the sort order checkbox is changed after a stream.
+if st.session_state.all_kw:
     with tab_lsi:
-        final_display = (list(reversed(state.all_kw))
-                         if st.session_state.order_top else state.all_kw)
+        # Determine the display order based on the current checkbox state
+        # This uses the 'order_top_val' directly from the checkbox, not a stored state,
+        # so it reacts immediately to checkbox changes if this part of the script reruns.
+        final_display_list = list(reversed(st.session_state.all_kw)) if order_top_val else st.session_state.all_kw
+        
+        # Only redraw this "final" display if the stream is not active.
+        # The live updates happen within stream_sse_keywords.
+        if not st.session_state.stream_active:
+            st.markdown(f"**Displaying {len(st.session_state.all_kw):,} keywords for '{st.session_state.last_seed}'**")
+            st.dataframe(
+                pd.DataFrame({"Keyword": final_display_list}),
+                use_container_width=True, 
+                hide_index=True,
+            )
 
-        st.dataframe(
-            pd.DataFrame({"Keyword": final_display}),
-            use_container_width=True,
-            hide_index=True,
-        )
-
-        # Copy / CSV export buttons
+        # Copy / CSV export buttons - always available if there are keywords
         col_spacer, col_copy, col_csv = st.columns([6, 1, 1])
         with col_copy:
-            if st.button("Copy All"):
-                joined = "\n".join(final_display)
-                st.text_input("_clip", value=joined, label_visibility="hidden")
-                st.markdown(
-                    "<script>"
-                    "navigator.clipboard.writeText("
-                    "document.getElementById('_clip').value);"
-                    "</script>",
-                    unsafe_allow_html=True,
-                )
-                st.toast("Copied ✔️")
+            if st.button("Prepare for Copy", key="copy_button"):
+                # Use the current display order for copying
+                copy_display_list = list(reversed(st.session_state.all_kw)) if order_top_val else st.session_state.all_kw
+                joined_keywords = "\n".join(copy_display_list)
+                st.text_area("Copy these keywords:", joined_keywords, height=150, key="copy_text_area")
+                st.info("Keywords ready in the text area above for you to copy.")
+
         with col_csv:
-            csv_bytes = ("\ufeff" + "\n".join(final_display)).encode("utf-8")
+            # Use the current display order for CSV export
+            csv_display_list = list(reversed(st.session_state.all_kw)) if order_top_val else st.session_state.all_kw
+            csv_bytes = ("\ufeff" + "\n".join(csv_display_list)).encode("utf-8") # Add BOM for Excel
             st.download_button(
-                "Export CSV",
+                "Export CSV", 
                 csv_bytes,
-                file_name=f"{seed}_lsi_keywords.csv",
-                mime="text/csv;charset=utf-8",
+                file_name=f"{st.session_state.last_seed}_lsi_keywords.csv",
+                mime="text/csv;charset=utf-8", 
+                key="download_csv_button"
             )
+elif st.session_state.last_seed and not st.session_state.stream_active and not st.session_state.all_kw and start_button_val:
+    # This handles the case where a search was attempted but yielded no results
+    # and the start button was the last interaction.
+    with tab_lsi:
+        st.info(f"No keywords were found for '{st.session_state.last_seed}' with the selected options, or the stream was interrupted.")
+
 
 # ── Footer ─────────────────────────────────────────────────────────────────
 st.markdown(
-    "<div style='text-align:center; font-size:0.8rem;'>⚡ Powered by LSI‑Agent API | Built with Streamlit</div>",
+    "<div class='footer-text'>⚡ LSI‑Agent API | Streamlit UI</div>", # Use class for styling
     unsafe_allow_html=True,
 )

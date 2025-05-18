@@ -1,0 +1,107 @@
+/* style.css */
+html, body, .stApp {
+    background: #ffffff !important; /* Ensure high specificity */
+    color: #000000 !important;
+}
+
+/* hide Streamlit’s chrome */
+header, footer, #MainMenu {
+    visibility: hidden;
+}
+
+/* buttons – white background, black border, invert on hover */
+div.stButton > button {
+    background: #ffffff;
+    color: #000000;
+    border: 1px solid #000000;
+    border-radius: 4px;
+    padding: 0.4rem 1.2rem;
+    font-weight: 600;
+}
+div.stButton > button:hover {
+    background: #000000;
+    color: #ffffff;
+}
+
+/* text inputs / textareas */
+input[type="text"], textarea {
+    background: #ffffff;
+    color: #000000;
+    border: 1px solid #000000;
+    border-radius: 4px;
+    padding: 0.45rem 0.6rem;
+}
+
+/* Checkbox styling */
+.stCheckbox label {
+    color: #000000 !important; /* Ensure label text is black */
+}
+.stCheckbox label:hover {
+    color: #000000 !important; /* Keep label text black on hover */
+}
+/* Ensure checkbox checkmark is visible */
+.stCheckbox input[type="checkbox"]:checked + div { /* Targets the visual box of the checkbox */
+    border-color: #000000 !important;
+    background-color: #000000 !important; /* Black background for checkmark area */
+}
+.stCheckbox input[type="checkbox"]:checked + div svg { /* Targets the checkmark SVG */
+    fill: #ffffff !important; /* White checkmark */
+}
+
+/* Ensure radio buttons are also styled for visibility if used in future */
+.stRadio label {
+    color: #000000 !important;
+}
+.stRadio input[type="radio"]:checked + div {
+    border-color: #000000 !important;
+    background-color: #000000 !important;
+}
+.stRadio input[type="radio"]:checked + div svg {
+    fill: #ffffff !important;
+}
+
+/* Ensure selectbox/dropdowns are styled if used in future */
+.stSelectbox div[data-baseweb="select"] > div { /* Targets the main select box container */
+    background-color: #ffffff !important;
+    border: 1px solid #000000 !important;
+    color: #000000 !important;
+    border-radius: 4px !important;
+}
+.stSelectbox div[data-baseweb="select"] input { /* Targets input within select box */
+    color: #000000 !important;
+}
+.stSelectbox div[data-baseweb="select"] svg { /* Targets dropdown arrow */
+    fill: #000000 !important;
+}
+/* Styling for dropdown menu items */
+div[data-baseweb="popover"] ul li {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+}
+div[data-baseweb="popover"] ul li:hover {
+    background-color: #f0f0f0 !important; /* Light grey on hover for dropdown items */
+}
+
+/* Progress bar styling */
+.stProgress > div > div > div > div {
+    background-color: #000000 !important; /* Black progress bar */
+}
+
+/* Ensure tabs are styled correctly */
+.stTabs [data-baseweb="tab-list"] button {
+    color: #000000 !important; /* Tab labels */
+    background-color: #ffffff !important;
+}
+.stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
+    color: #000000 !important;
+    border-bottom: 2px solid #000000 !important; /* Active tab indicator */
+    background-color: #f0f0f0 !important; /* Slightly different background for active tab */
+}
+
+/* Footer styling */
+.footer-text {
+    text-align:center;
+    font-size:0.8rem;
+    padding-top: 20px;
+    color: #000000; /* Ensure footer text is black */
+}

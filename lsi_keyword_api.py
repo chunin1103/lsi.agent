@@ -1,4 +1,5 @@
 """
+Keep this here to run uvicorn lsi_keyword_api:app --reload
 LSI Keyword API – v2.0  (async / streaming)
 -------------------------------------------
 * First keyword arrives in ≈ 0.5 s (Autosuggest RTT).
