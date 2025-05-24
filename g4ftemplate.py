@@ -1,4 +1,4 @@
-# g4f_wrapper_simple.py
+# g4ftemplate.py
 import asyncio, g4f
 from tenacity import retry, stop_after_attempt, wait_exponential
 

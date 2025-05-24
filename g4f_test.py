@@ -1,4 +1,4 @@
-# example_hanoi_eats.py
+# g4f_test.py
 import g4f
 from g4ftemplate import g4f_chat     # import the sync helper
 

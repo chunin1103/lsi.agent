@@ -6,7 +6,7 @@ import pathlib
 # API Metadata
 API_TITLE = "LSI Keyword API (SSE - Refactored)"
 API_VERSION = "2.3.0" # Updated version for refactoring
-OPENAPI_DESC_PATH = pathlib.Path(__file__).parent / "api_swagger.md" # Assuming api_swagger.md is in the same dir as main.py
+OPENAPI_DESC_PATH = pathlib.Path(__file__).parent / "api_swagger.md" 
 
 # Keyword Generation Limits & Behavior
 DEFAULT_KEYWORD_LIMIT = 100000  # Overall hard limit for keywords from all sources
