@@ -1,16 +1,19 @@
-# app.py (Refactored Streamlit Client)
+# app.py (Refactored Streamlit Client with Progressive Clustering UI)
 import streamlit as st
 import pandas as pd
 import pathlib
+import time 
+from typing import List, Optional, Dict, Any 
 
-# Import functions from the new api_client.py
+# Import functions from the api_client.py
 try:
-    from api_client import get_api_status, stream_sse_keywords
+    from api_client import get_api_status, stream_sse_keywords, call_cluster_api, LLMConfigClientInput 
 except ImportError:
-    st.error("Failed to import api_client.py. Make sure it's in the same directory or Python path.")
-    # Fallback or stop execution if critical
+    st.error("Failed to import from api_client.py. Make sure it's in the same directory or Python path.")
     def get_api_status(seed_kw, planner_active): return {"total_cached_keywords":0} 
-    def stream_sse_keywords(*args, **kwargs): st.error("API client not available."); return
+    def stream_sse_keywords(*args, **kwargs): st.error("API client (stream) not available."); return False
+    def call_cluster_api(*args, **kwargs): st.error("API client (cluster) not available."); return None
+    class LLMConfigClientInput: pass 
 
 
 # ── Page & global config ───────────────────────────────────────────────────
@@ -20,135 +23,197 @@ st.set_page_config(page_title="Keyword Burst Buddy", layout="wide")
 def load_css(file_name):
     """Loads an external CSS file into the Streamlit app."""
     try:
-        css_path = pathlib.Path(__file__).parent / file_name
+        css_path = pathlib.Path(__file__).parent / "templates" / file_name
         with open(css_path) as f:
             st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
         print(f"APP: Loaded CSS from {css_path}")
     except FileNotFoundError:
-        st.error(f"CSS file not found: {file_name} at {css_path}")
+        st.error(f"CSS file not found: {file_name} at {css_path}. Please ensure 'templates/style.css' exists.")
         print(f"APP: ERROR - CSS file not found: {file_name} at {css_path}")
 
+load_css("style.css") 
 
-# Load the external CSS file
-load_css("./templates/style.css")
+# ── Title & Global Summary Metrics ───────────────────────────────────────────
+st.title("LSI Keyword Buddy") 
+st.caption("Generate and cluster SEO keywords")
 
-# ── Title ──────────────────────────────────────────────────────────────────
-st.title("Keyword Burst Buddy")
-st.caption("Real-time LSI Keyword Generation with Server-Sent Events")
+if "total_keywords_generated" not in st.session_state: st.session_state.total_keywords_generated = 0
+if "total_topics_clustered" not in st.session_state: st.session_state.total_topics_clustered = 0
 
-# ── User controls ──────────────────────────────────────────────────────────
-# Use a form to group inputs and the button, which can sometimes improve interaction consistency
-with st.form(key="keyword_form"):
-    seed_input_val = st.text_input("Seed keyword", placeholder="e.g. nước mắm", key="seed_input")
-    use_planner_val = st.checkbox("Use Google Ads Planner", value=True, key="use_planner_checkbox")
-    order_top_val = st.checkbox("Show newest keywords on top", value=True, key="order_top_checkbox")
-    start_button_val = st.form_submit_button(label="Generate Keywords")
-
-
-# ── Tabs (only LSI is wired for now) ───────────────────────────────────────
-tab_lsi, tab_cluster, tab_vis = st.tabs(["LSI Keywords", "Topic Clusters", "Visualization"])
-
-# ── Streamlit session state ────────────────────────────────────────────────
-# Initialize session state variables if they don't exist
-if "all_kw" not in st.session_state:
-    st.session_state.all_kw = []  # Stores keywords as they arrive
-if "stream_active" not in st.session_state:
-    st.session_state.stream_active = False # Tracks if a stream is currently active
-if "last_seed" not in st.session_state:
-    st.session_state.last_seed = "" # Stores the last seed used for generation
-if "last_planner_option" not in st.session_state:
-    st.session_state.last_planner_option = True # Stores the last planner option
+header_cols = st.columns([3, 1, 1, 3]) 
+with header_cols[0]:
+    seed_input_val = st.text_input("Enter seed keyword", placeholder="e.g., nước mắm", key="seed_input_main", label_visibility="collapsed")
+with header_cols[1]:
+    start_button_val = st.button("Generate & Cluster", key="generate_button_main", use_container_width=True)
+with header_cols[2]:
+    total_keywords_metric_placeholder = st.empty()
+with header_cols[3]:
+    total_topics_metric_placeholder = st.empty()
+    
+# Update metrics display based on session state (will update on rerun)
+total_keywords_metric_placeholder.metric(label="Total Keywords", value=st.session_state.total_keywords_generated)
+total_topics_metric_placeholder.metric(label="Total Topics", value=st.session_state.total_topics_clustered)
 
 
-# ── Main generate logic (triggered by form submission) ─────────────────────
-if start_button_val: # This is True when the form's submit button is clicked
-    current_seed = seed_input_val.strip()
-    current_planner_option = use_planner_val
-    current_order_top = order_top_val # Get the current sort order preference
+cols_options = st.columns([1,1,5]) 
+with cols_options[0]:
+    use_planner_val = st.checkbox("Use Google Ads Planner", value=True, key="use_planner_checkbox_main")
+
+# ── Streamlit session state initialization ─────────────────────────────────
+if "all_kw" not in st.session_state: st.session_state.all_kw = []  
+if "stream_active" not in st.session_state: st.session_state.stream_active = False 
+if "last_seed" not in st.session_state: st.session_state.last_seed = "" 
+if "last_planner_option" not in st.session_state: st.session_state.last_planner_option = True 
+if "topic_clusters" not in st.session_state: st.session_state.topic_clusters = [] 
+if "existing_topic_names_session" not in st.session_state: st.session_state.existing_topic_names_session = []
+
+
+# --- Function to display topic clusters ---
+# This function is now self-contained and reads directly from session_state
+def display_topic_clusters_in_ui(placeholder_element): # Definition
+    """Renders the topic clusters from session_state into the provided placeholder."""
+    with placeholder_element.container(): 
+        clusters_list = st.session_state.get("topic_clusters", [])
+        # Use last_seed from session_state for button key uniqueness
+        current_display_seed_for_key = st.session_state.get("last_seed", "defaultseed").replace(' ','_')
+
+
+        if clusters_list:
+            st.markdown(f"Found **{len(clusters_list)}** topics for '{st.session_state.get('last_seed', 'your keywords')}'.")
+            for i, cluster_data_obj in enumerate(clusters_list):
+                topic_name = cluster_data_obj.topic_name 
+                keywords_in_cluster = cluster_data_obj.keywords
+                with st.container(): 
+                    st.markdown(f"<h6>{topic_name}</h6>", unsafe_allow_html=True) 
+                    st.caption(f"`{len(keywords_in_cluster)} keywords`")
+                    
+                    button_key = f"discover_btn_{topic_name.replace(' ','_')}_{i}_{current_display_seed_for_key}"
+                    st.button("Discover", 
+                              key=button_key, 
+                              help=f"Explore '{topic_name}' further (not yet implemented)", 
+                              use_container_width=False) 
+
+                    displayed_kws = keywords_in_cluster[:3]
+                    for kw_idx, kw in enumerate(displayed_kws):
+                        st.markdown(f"<small style='color: #555; margin-left: 10px;'>• {kw}</small>", unsafe_allow_html=True)
+                    
+                    if len(keywords_in_cluster) > 3:
+                        with st.expander(f"Show {len(keywords_in_cluster) - 3} more keywords..."):
+                            for kw_rest_idx, kw_rest in enumerate(keywords_in_cluster[3:]):
+                                st.markdown(f"<small style='color: #555; margin-left: 10px;'>• {kw_rest}</small>", unsafe_allow_html=True)
+                    st.markdown("<hr style='margin-top: 0.5rem; margin-bottom: 0.5rem;'>", unsafe_allow_html=True)
+        
+        elif st.session_state.last_seed and not st.session_state.stream_active: 
+            if not st.session_state.all_kw : 
+                 st.info("No keywords were generated. Cannot perform clustering.")
+            elif st.session_state.all_kw and not clusters_list: 
+                st.info("Clustering is pending or did not produce any topics for the generated keywords.")
+
+
+# ── Main Content Area: Two Columns for Clusters and All Keywords ───────────
+left_column, right_column = st.columns([2, 3]) 
+
+with left_column:
+    st.subheader("Topic Clusters")
+    topic_clusters_display_placeholder = st.empty() 
+
+with right_column:
+    st.subheader("All Keywords")
+    keywords_summary_placeholder = st.empty() 
+    keywords_table_placeholder = st.empty()   
+    all_keywords_buttons_placeholder = st.empty()
+
+
+# Global progress bars
+sse_progress_bar_placeholder = st.empty()
+cluster_progress_bar_placeholder = st.empty() 
+
+
+# ── Main generate and cluster logic ────────────────────────────────────────
+if start_button_val: 
+    current_seed = seed_input_val.strip() 
+    current_planner_option = use_planner_val 
+    current_order_top = True  
 
     if not current_seed:
         st.warning("Please enter a seed keyword first.")
     else:
         print(f"APP: Start button clicked. Seed: '{current_seed}', Planner: {current_planner_option}")
-        # Reset keywords if the seed or planner option has changed, or if no keywords from last run
-        if (current_seed != st.session_state.last_seed or 
-            current_planner_option != st.session_state.last_planner_option or 
-            not st.session_state.all_kw):
-            st.session_state.all_kw = [] 
-            print("APP: Resetting all_kw due to new seed/options or empty previous run.")
+        st.session_state.all_kw = [] 
+        st.session_state.topic_clusters = [] 
+        topic_clusters_display_placeholder.empty() 
+        keywords_table_placeholder.empty() 
+        keywords_summary_placeholder.empty() 
+        st.session_state.total_keywords_generated = 0 
+        st.session_state.total_topics_clustered = 0
+        total_keywords_metric_placeholder.metric(label="Total Keywords", value=0) 
+        total_topics_metric_placeholder.metric(label="Total Topics", value=0) # Corrected line below
+        st.session_state.existing_topic_names_session = [] 
         
         st.session_state.last_seed = current_seed
         st.session_state.last_planner_option = current_planner_option
-
-        # Define placeholders within the LSI tab for dynamic content
-        with tab_lsi:
-            summary_placeholder = st.empty()
-            table_placeholder = st.empty()
         
-        # Progress bar will be outside the tab, globally visible during generation
-        progress_bar = st.progress(0.0, text="Initializing stream...")
-        
-        with st.spinner(f"Initiating keyword generation for '{current_seed}'..."):
-            # Call the keyword streaming function from api_client.py
-            stream_sse_keywords(
+        with st.spinner(f"Processing keywords and topics for '{current_seed}'..."):
+            stream_successful = stream_sse_keywords(
                 current_seed, 
                 current_planner_option,
-                current_order_top, # Pass the sort order
-                summary_placeholder,
-                table_placeholder,
-                progress_bar,
-                st.session_state # Pass the whole session state object
+                current_order_top, 
+                keywords_summary_placeholder, 
+                keywords_table_placeholder,   
+                sse_progress_bar_placeholder, 
+                cluster_progress_bar_placeholder, 
+                st.session_state 
             )
-
-# ── Display final/current results (reacts to checkbox toggling or if data exists) ──
-# This section ensures the UI updates if the sort order checkbox is changed after a stream.
-if st.session_state.all_kw:
-    with tab_lsi:
-        # Determine the display order based on the current checkbox state
-        # This uses the 'order_top_val' directly from the checkbox, not a stored state,
-        # so it reacts immediately to checkbox changes if this part of the script reruns.
-        final_display_list = list(reversed(st.session_state.all_kw)) if order_top_val else st.session_state.all_kw
         
-        # Only redraw this "final" display if the stream is not active.
-        # The live updates happen within stream_sse_keywords.
-        if not st.session_state.stream_active:
-            st.markdown(f"**Displaying {len(st.session_state.all_kw):,} keywords for '{st.session_state.last_seed}'**")
-            st.dataframe(
-                pd.DataFrame({"Keyword": final_display_list}),
-                use_container_width=True, 
-                hide_index=True,
-            )
+        total_keywords_metric_placeholder.metric(label="Total Keywords", value=st.session_state.total_keywords_generated)
+        # Corrected SyntaxError here:
+        total_topics_metric_placeholder.metric(label="Total Topics", value=st.session_state.total_topics_clustered)
 
-        # Copy / CSV export buttons - always available if there are keywords
-        col_spacer, col_copy, col_csv = st.columns([6, 1, 1])
-        with col_copy:
-            if st.button("Prepare for Copy", key="copy_button"):
-                # Use the current display order for copying
-                copy_display_list = list(reversed(st.session_state.all_kw)) if order_top_val else st.session_state.all_kw
-                joined_keywords = "\n".join(copy_display_list)
-                st.text_area("Copy these keywords:", joined_keywords, height=150, key="copy_text_area")
-                st.info("Keywords ready in the text area above for you to copy.")
+        if not stream_successful:
+            st.error("Keyword processing encountered an issue.")
+        elif not st.session_state.all_kw:
+            st.info("No keywords were generated from the stream.")
+        
+        sse_progress_bar_placeholder.empty()
+        cluster_progress_bar_placeholder.empty()
+        
+# --- Persistent Display of Topic Clusters & All Keywords ---
+# This section runs on every script rerun, drawing based on current session_state.
 
-        with col_csv:
-            # Use the current display order for CSV export
-            csv_display_list = list(reversed(st.session_state.all_kw)) if order_top_val else st.session_state.all_kw
-            csv_bytes = ("\ufeff" + "\n".join(csv_display_list)).encode("utf-8") # Add BOM for Excel
+display_topic_clusters_in_ui(topic_clusters_display_placeholder) 
+
+if st.session_state.all_kw: 
+    if not st.session_state.stream_active: 
+        keywords_summary_placeholder.markdown(f"**Total {len(st.session_state.all_kw):,} unique keywords fetched for '{st.session_state.last_seed}'.**")
+        order_top = True 
+        display_order = list(reversed(st.session_state.all_kw)) if order_top else st.session_state.all_kw
+        df_all_kws = pd.DataFrame({"Keyword": display_order})
+        keywords_table_placeholder.dataframe(df_all_kws, use_container_width=True, hide_index=True, height=400)
+
+    with all_keywords_buttons_placeholder.container(): 
+        kw_button_cols = st.columns(2)
+        with kw_button_cols[0]:
+            if st.button("Prepare for Copy (All Kws)", key="copy_all_kws_button_main_v3", use_container_width=True):
+                order_top = True 
+                copy_all_kws_list = list(reversed(st.session_state.all_kw)) if order_top else st.session_state.all_kw
+                joined_all_keywords = "\n".join(copy_all_kws_list)  # Corrected: was copy_all_k_ws_list
+                st.text_area("Copy all keywords:", joined_all_keywords, height=150, key="copy_all_kws_text_area_main_v3")
+                st.info("All keywords ready in the text area above for you to copy.")
+        with kw_button_cols[1]:
+            order_top = True 
+            csv_all_kws_list = list(reversed(st.session_state.all_kw)) if order_top else st.session_state.all_kw
+            csv_all_bytes = ("\ufeff" + "\n".join(csv_all_kws_list)).encode("utf-8") 
             st.download_button(
-                "Export CSV", 
-                csv_bytes,
-                file_name=f"{st.session_state.last_seed}_lsi_keywords.csv",
-                mime="text/csv;charset=utf-8", 
-                key="download_csv_button"
+                "Export CSV (All Kws)", csv_all_bytes,
+                file_name=f"{st.session_state.last_seed}_all_lsi_keywords.csv",
+                mime="text/csv;charset=utf-8", key="download_all_kws_csv_button_main_v3", use_container_width=True
             )
-elif st.session_state.last_seed and not st.session_state.stream_active and not st.session_state.all_kw and start_button_val:
-    # This handles the case where a search was attempted but yielded no results
-    # and the start button was the last interaction.
-    with tab_lsi:
-        st.info(f"No keywords were found for '{st.session_state.last_seed}' with the selected options, or the stream was interrupted.")
+elif st.session_state.last_seed and not st.session_state.stream_active and start_button_val : 
+     keywords_summary_placeholder.info("No keywords were generated from the stream.")
 
 
 # ── Footer ─────────────────────────────────────────────────────────────────
 st.markdown(
-    "<div class='footer-text'>⚡ LSI‑Agent API | Streamlit UI</div>", # Use class for styling
+    "<div class='footer-text'>⚡ LSI‑Agent API | Streamlit UI</div>", 
     unsafe_allow_html=True,
 )

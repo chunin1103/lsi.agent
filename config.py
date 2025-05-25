@@ -36,23 +36,18 @@ LOG_FILE_BACKUP_COUNT = 5
 # SSE Configuration
 SSE_QUEUE_TIMEOUT_SECONDS = 1.0 
 
-# --- LLM Configuration for Topic Clustering ---
-DEFAULT_LLM_MODEL = "gpt-4o"  # Default model if not specified in request
-
-# List of preferred provider NAMES (strings) to try in order.
-# Case-sensitive, should match names in g4f.Provider (e.g., "Liaobots", "Blackbox", "Pollinations")
-# An empty list or a list containing only `None` (as a concept, here string "Auto" or leave list empty)
-# will effectively let g4f_chat_async auto-select.
-# Example: PREFERRED_LLM_PROVIDERS = ["Liaobots", "Blackbox", "PollinationsAI", "Auto"]
-# "Auto" will be treated as letting g4f pick if other specified ones fail or if it's the only one.
+# LLM Configuration for Topic Clustering
+DEFAULT_LLM_MODEL = "gpt-4o"  
 PREFERRED_LLM_PROVIDERS: list[str | None] = [
-    "PollinationsAI"
-    "Liaobots",
+    "PollinationsAI",
     "Blackbox",
-    None  # Represents letting g4f auto-select as a final fallback or if list is empty
+    "Liaobots",
+    None 
 ]
-
 DEFAULT_LLM_TEMPERATURE = 0.7
 DEFAULT_LLM_TIMEOUT_SECONDS = 120 
+
+# New: Batch size for progressive clustering
+CLUSTER_KEYWORD_BATCH_SIZE = 50 # Number of new keywords to accumulate before triggering a cluster call
 # --- End LLM Configuration ---
 
