@@ -1,31 +1,58 @@
+# config.py
 """
 Configuration constants for the LSI Keyword API.
 """
 import pathlib
+import logging 
 
 # API Metadata
 API_TITLE = "LSI Keyword API (SSE - Refactored)"
-API_VERSION = "2.3.0" # Updated version for refactoring
-OPENAPI_DESC_PATH = pathlib.Path(__file__).parent / "api_swagger.md" 
+API_VERSION = "2.3.0" 
+OPENAPI_DESC_PATH = pathlib.Path("api_swagger.md") 
 
 # Keyword Generation Limits & Behavior
-DEFAULT_KEYWORD_LIMIT = 100000  # Overall hard limit for keywords from all sources
-SUGGEST_MAX_DEPTH = 1           # BFS depth for Google Autosuggest crawl
-SUGGEST_POLITE_SLEEP_SECONDS = 1 # Delay between Google Autosuggest calls
+DEFAULT_KEYWORD_LIMIT = 100000  
+SUGGEST_MAX_DEPTH = 1           
+SUGGEST_POLITE_SLEEP_SECONDS = 1 
 
 # Cache Configuration
-CACHE_TTL_SECONDS = 3600        # Cache freshness in seconds (1 hour)
+CACHE_TTL_SECONDS = 3600        
 
 # Google Ads Configuration
-GOOGLE_ADS_CONFIG_PATH = "./google-ads.yaml" # Path to Google Ads API credentials
+GOOGLE_ADS_CONFIG_PATH = "./google-ads.yaml" 
 
-# Logging Configuration (Basic, can be expanded)
-LOG_LEVEL = "INFO"
-LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s" # Added logger name
+# Logging Configuration
+LOG_LEVEL = "INFO" 
+LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s" 
 LOG_DATE_FORMAT = "%H:%M:%S"
+LOG_LEVEL_HTTPX = "WARNING" 
+LOG_LEVEL_G4F = "INFO" 
+ENABLE_FILE_LOGGING = True 
+LOG_FILE_PATH = "lsi_api.log" 
+LOG_FILE_LEVEL = "DEBUG" 
+LOG_FILE_MAX_BYTES = 10 * 1024 * 1024  
+LOG_FILE_BACKUP_COUNT = 5 
 
 # SSE Configuration
-SSE_QUEUE_TIMEOUT_SECONDS = 1.0 # Timeout for queue.get() in SSE stream
+SSE_QUEUE_TIMEOUT_SECONDS = 1.0 
 
-# Development/Debug settings (optional)
-# DEBUG_MODE = False
+# --- LLM Configuration for Topic Clustering ---
+DEFAULT_LLM_MODEL = "gpt-4o"  # Default model if not specified in request
+
+# List of preferred provider NAMES (strings) to try in order.
+# Case-sensitive, should match names in g4f.Provider (e.g., "Liaobots", "Blackbox", "Pollinations")
+# An empty list or a list containing only `None` (as a concept, here string "Auto" or leave list empty)
+# will effectively let g4f_chat_async auto-select.
+# Example: PREFERRED_LLM_PROVIDERS = ["Liaobots", "Blackbox", "PollinationsAI", "Auto"]
+# "Auto" will be treated as letting g4f pick if other specified ones fail or if it's the only one.
+PREFERRED_LLM_PROVIDERS: list[str | None] = [
+    "PollinationsAI"
+    "Liaobots",
+    "Blackbox",
+    None  # Represents letting g4f auto-select as a final fallback or if list is empty
+]
+
+DEFAULT_LLM_TEMPERATURE = 0.7
+DEFAULT_LLM_TIMEOUT_SECONDS = 120 
+# --- End LLM Configuration ---
+

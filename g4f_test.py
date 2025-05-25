@@ -12,7 +12,7 @@ messages = [
         "role": "user",
         "content": (
             """
-            Tìm từ khóa gốc dựa trên phương pháp LSI cho từ khóa sau: "Nước mắm". Tránh lặp lại từ này trong danh sách từ khóa.
+            Tìm từ khóa gốc dựa trên phương pháp LSI cho từ khóa sau: "Nước mắm". Tránh lặp lại từ này trong danh sách từ khóa. Và trả lời dưới định dạng json
             """
         ),
     },
