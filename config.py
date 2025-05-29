@@ -39,15 +39,15 @@ SSE_QUEUE_TIMEOUT_SECONDS = 1.0
 # LLM Configuration for Topic Clustering
 DEFAULT_LLM_MODEL = "gpt-4o"  
 PREFERRED_LLM_PROVIDERS: list[str | None] = [
-    "PollinationsAI",
-    "Blackbox",
     "Liaobots",
+    "Blackbox",
+    "PollinationsAI",
     None 
 ]
 DEFAULT_LLM_TEMPERATURE = 0.7
 DEFAULT_LLM_TIMEOUT_SECONDS = 120 
 
-# New: Batch size for progressive clustering
-CLUSTER_KEYWORD_BATCH_SIZE = 50 # Number of new keywords to accumulate before triggering a cluster call
+# Batch size for progressive clustering
+CLUSTER_KEYWORD_BATCH_SIZE = 70 # Set to your desired value
 # --- End LLM Configuration ---
 
